@@ -73,6 +73,8 @@ LIMIT 20;
 sqlite3 D:\news_daily.db "SELECT 'bloomberg' AS src, pub_time, title_en, title_zh FROM bloomberg_news UNION ALL SELECT 'wsj', pub_time, title_en, title_zh FROM wsj_news UNION ALL SELECT 'reuters', pub_time, title_en, title_zh FROM reuters_news ORDER BY pub_time DESC LIMIT 20;"
 ```
 
+<img src="images/浏览彭博社新闻全文示意图.png" alt="浏览彭博社新闻全文示意图.png">
+
 
 
 
