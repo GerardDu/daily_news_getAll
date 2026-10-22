@@ -10,9 +10,11 @@
 
 依次执行三个抓取程序(路透社 -> 华尔街日报 -> 彭博),
 
-全部执行完后,从 D:\\news_daily.db 中合并三张表,显示最新 15 条。
+全部执行完后，从 D:\\news_daily.db 中合并三张表，显示最新 15 条。
 
-在win10上使用:
+注：另外附有不需要保存到sqlite数据库，而是保存到当前文件夹下按日期命名的md文件的程序。
+
+在win10上使用：
 
 ```powershell
 sqlite3 --version
@@ -22,7 +24,7 @@ python --version
 Python 3.13.7
 ```
 
-涉及四个程序:
+涉及四个程序：
 
 ```
 
@@ -37,13 +39,13 @@ run_news3_and_query15.py
 
 执行run_news3_and_query15.py即可。
 
-终端会显示如下效果:
+终端会显示如下效果：
 
 <img src="images/获取三家新闻并展示效果图.png" alt="获取三家新闻并展示效果图.png">
 
-数据库查看:
+数据库查看：
 
-使用DBX连接并查看。可以执行这个sql语句。我已保存该sql到数据库的查询中。
+使用DBX（数据库管理软件）连接并查看。可以执行这个sql语句。我已保存该sql到数据库的查询中。
 
 ```sql
 SELECT 'bloomberg' AS src,
@@ -67,11 +69,13 @@ ORDER BY pub_time DESC
 LIMIT 20;
 ```
 
-附终端查看方法
+附终端查看方法：
 
 ```powershell
 sqlite3 D:\news_daily.db "SELECT 'bloomberg' AS src, pub_time, title_en, title_zh FROM bloomberg_news UNION ALL SELECT 'wsj', pub_time, title_en, title_zh FROM wsj_news UNION ALL SELECT 'reuters', pub_time, title_en, title_zh FROM reuters_news ORDER BY pub_time DESC LIMIT 20;"
 ```
+
+查看全文示例图：
 
 <img src="images/浏览彭博社新闻全文示意图.png" alt="浏览彭博社新闻全文示意图.png">
 
