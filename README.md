@@ -80,6 +80,6 @@ sqlite3 D:\news_daily.db "SELECT 'bloomberg' AS src, pub_time, title_en, title_z
 <img src="images/浏览彭博社新闻全文示意图.png" alt="浏览彭博社新闻全文示意图.png">
 
 
+建议使用欧路词典翻译，不要使用爱词霸，这个爱词霸软件会故意根据英文内容选择性翻译：
 
-
-
+<img src="images/爱词霸和欧路词典对比.png" alt="爱词霸和欧路词典对比.png">
