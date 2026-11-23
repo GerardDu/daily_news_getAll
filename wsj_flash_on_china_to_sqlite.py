@@ -2,12 +2,18 @@
 # -*- coding: utf-8 -*-
 """
 wsj_flash_on_china_to_sqlite.py
-抓取华尔街日报(WSJ)RSS 中"与中国相关"的最新 5 条 -> 翻译标题
--> 写入 SQLite 数据库 D:\news_daily.db 的 wsj_news 表
-   (库或表不存在则自动创建;已存在则直接追加,按链接去重)
+抓取华尔街日报(WSJ)RSS 中"与中国相关"的最新 LIMIT 条 -> 翻译标题
+-> 写入 SQLite 数据库 D:\\news_daily.db 的 wsj_news 表
+   (库或表不存在则自动创建;已存在则直接追加,按链接/标题去重)
 
 筛选方式:WSJ 的 RSS 没有按关键词搜索的功能,所以先抓取多个栏目,
           再检查"标题"是否包含 CHINA_KEYWORDS 里的关键词(只看标题,不看摘要)。
+
+去重说明(本版修复):
+  同一篇文章出现在不同栏目的 RSS 时,链接末尾的 ?mod=xxx 参数不同,
+  旧版会把它们当成两篇文章。现在:
+    1) 链接统一去掉 ?参数 和 #锚点,只保留 域名+路径
+    2) 入库前同时按"规范化链接"和"英文标题"查重,兼容库中旧的带参数记录
 
 特点:
   * 只用 Python 标准库,不需要 pip 安装任何东西(Python 3.7+)
@@ -17,7 +23,7 @@ wsj_flash_on_china_to_sqlite.py
   * pub_time = 文章发布时间(北京时间);fetched_at = 本次运行时间(北京时间)
 
 用法:
-  wsj_flash_on_china_to_sqlite.py
+  python wsj_flash_on_china_to_sqlite.py
 """
 import json
 import re
@@ -37,22 +43,33 @@ FEEDS = [
     "https://feeds.content.dowjones.io/public/rss/socialeconomyfeed", # 经济
     "https://feeds.content.dowjones.io/public/rss/socialpoliticsfeed",# 政治
 ]
-LIMIT = 5
+LIMIT = 15
 TIMEOUT = 15
 DB_PATH = r"D:\news_daily.db"   # 数据库文件位置
 TABLE = "wsj_news"          # 表名
 
 # 中国相关关键词(不区分大小写,按完整单词匹配;可自行增删)
 CHINA_KEYWORDS = [
-    "china", "chinese", "beijing", "xi jinping", "shanghai", "shenzhen",
-    "yuan", "renminbi", "pboc", "中国",
+    # 国家与地区
+    "china", "chinese", "beijing", "shanghai", "shenzhen", "hong kong",
+    "xinjiang", "tibet", "south china sea", "belt and road",
+    # 人物与机构
+    "xi jinping", "xi", "li qiang", "politburo", "ccp", "pboc",
+    "people's bank of china", "csrc",
+    # 金融
+    "yuan", "renminbi", "hang seng", "csi 300", "evergrande", "country garden",
+    # 公司与科技
+    "alibaba", "tencent", "baidu", "huawei", "xiaomi", "byd", "catl",
+    "bytedance", "tiktok", "deepseek", "smic", "Jensen Huang", "Nvidia",
+    # 中文
+    "中国",
 ]
 CHINA_RE = re.compile(
     r"(?<![A-Za-z])(" + "|".join(re.escape(k) for k in CHINA_KEYWORDS) + r")(?![A-Za-z])",
     re.IGNORECASE,
 )
 TZ = timezone(timedelta(hours=8))  # 北京时间
-UA = {"User-Agent": "Mozilla/5.0 (compatible; news-flash/2.0)"}
+UA = {"User-Agent": "Mozilla/5.0 (compatible; news-flash/2.1)"}
 
 
 def log(msg):
@@ -63,6 +80,14 @@ def http_get(url):
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         return resp.read()
+
+
+def norm_link(url):
+    """去掉 ?mod=... 等查询参数和 # 锚点,只保留 协议+域名+路径。"""
+    p = urllib.parse.urlsplit((url or "").strip())
+    if not p.netloc:
+        return (url or "").strip()
+    return urllib.parse.urlunsplit((p.scheme, p.netloc, p.path.rstrip("/"), "", ""))
 
 
 # ---------------- 抓取 RSS ----------------
@@ -86,7 +111,7 @@ def parse_time(text):
 
 
 def fetch_items():
-    seen, items = set(), []
+    seen_links, seen_titles, items = set(), set(), []
     for url in FEEDS:
         try:
             root = ET.fromstring(http_get(url))
@@ -95,13 +120,15 @@ def fetch_items():
             continue
         for it in root.iter("item"):
             title = (it.findtext("title") or "").strip()
-            link = (it.findtext("link") or "").strip()
-            key = link or (it.findtext("guid") or title)
-            if not title or key in seen:
+            link = norm_link(it.findtext("link"))     # 规范化:去掉 ?mod= 等参数
+            if not title or not link:
                 continue
-            if not CHINA_RE.search(title):   # 标题中没有中国相关词就跳过
+            if link in seen_links or title in seen_titles:
+                continue                              # 本次运行内去重(链接或标题相同)
+            if not CHINA_RE.search(title):            # 标题中没有中国相关词就跳过
                 continue
-            seen.add(key)
+            seen_links.add(link)
+            seen_titles.add(title)
             pub = parse_time(it.findtext("pubDate"))
             if pub is None:
                 for child in it:  # 兼容 dc:date 之类的标签
@@ -160,15 +187,19 @@ def init_db(conn):
             fetched_at TEXT NOT NULL       -- 抓取时间(北京时间)
         )""")
     conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_pub ON {TABLE}(pub_time)")
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_title ON {TABLE}(title_en)")
 
 
 def save_items(conn, items, now):
-    """新链接 -> 插入;已存在但中文标题为空 -> 补译更新;其余跳过。"""
+    """新文章 -> 插入;已存在但中文标题为空 -> 补译更新;其余跳过。
+    "已存在"的判断:规范化链接相同,或英文标题相同(兼容库中带 ?mod= 的旧记录)。"""
     inserted = updated = skipped = 0
     fetched_at = f"{now:%Y-%m-%d %H:%M:%S}"
     for it in items:
-        row = conn.execute(f"SELECT id, title_zh FROM {TABLE} WHERE link = ?",
-                           (it["link"],)).fetchone()
+        row = conn.execute(
+            f"SELECT id, title_zh FROM {TABLE} WHERE link = ? OR title_en = ? "
+            f"ORDER BY (title_zh IS NULL), id LIMIT 1",
+            (it["link"], it["title"])).fetchone()
         if row and row[1]:                      # 已有且已翻译 -> 跳过
             skipped += 1
             continue
